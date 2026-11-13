@@ -2,7 +2,7 @@
 const $=id=>document.getElementById(id);
 const games=[['🗺️','冒険クエスト','地図の暗号を解いて、12の道を進もう。'],['🐣','ペット育成','ごはん・お手入れ・トレーニング。相棒のお願いを覚えてお世話しよう。'],['⚾','おはようホームラン','背番号の計算と配球の記憶で12打席に挑もう。'],['✈️','パイロットへの道','燃料計算と航路の記憶で目的地へ飛ぼう。'],['🎁','ミステリーボックス','箱の暗証番号と宝石の並びを解こう。'],['🧩','起床ミッション','計算・記憶・身の回りの観察で頭を起こそう。']];
 let data;try{data=JSON.parse(localStorage.getItem('morningLab')||'{}')}catch{data={}}if(!data||typeof data!=='object'||Array.isArray(data))data={};
-data.points=Number.isFinite(data.points)?data.points:0;data.records=data.records&&typeof data.records==='object'&&!Array.isArray(data.records)?data.records:{};data.target=/^0[456]:[0-5][05]$/.test(data.target||'')&&data.target>='04:30'&&data.target<='06:30'?data.target:'06:30';data.sound=['bell','rise','pulse'].includes(data.sound)?data.sound:'bell';data.volume=Number.isFinite(data.volume)?Math.max(10,Math.min(100,data.volume)):60;
+data.points=Number.isFinite(data.points)?data.points:0;data.records=data.records&&typeof data.records==='object'&&!Array.isArray(data.records)?data.records:{};data.target=/^0[456]:[0-5][05]$/.test(data.target||'')&&data.target>='04:30'&&data.target<='06:30'?data.target:'06:30';data.sound=['bell','rise','pulse','strongBell','siren','hard'].includes(data.sound)?data.sound:'bell';data.volume=Number.isFinite(data.volume)?Math.max(10,Math.min(100,data.volume)):60;
 const parts=(date=new Date())=>Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(date).map(p=>[p.type,p.value]));
 const dateString=t=>`${t.year}-${t.month}-${t.day}`;
 function dayKey(){const t=parts();return dateString(parts(new Date(Date.now()-(t.hour+':'+t.minute<'04:30'?86400000:0))))}
@@ -27,7 +27,21 @@ $('play').onclick=()=>{if(data.records[dayKey()]||run)return;run={day:dayKey(),g
 games.forEach((g,i)=>{const b=document.createElement('button');b.className='mode';b.innerHTML=`<span>${g[0]}</span>${g[1]}`;b.onclick=()=>choose(i);$('modes').appendChild(b)});
 for(let m=270;m<=390;m+=5){const s=String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');$('target').add(new Option(s,s))}$('target').value=data.target;$('target').onchange=()=>{data.target=$('target').value;save()};$('sound').value=data.sound;$('sound').onchange=()=>{data.sound=$('sound').value;save()};$('volume').value=data.volume;function volume(){data.volume=Number($('volume').value);$('volumeValue').textContent=data.volume+'%'}volume();$('volume').oninput=volume;$('volume').onchange=save;
 let audioCtx,ringTimer,testTimer,armed=false,lastRing='',wakeLock;async function unlock(){audioCtx||=new(window.AudioContext||window.webkitAudioContext)();await audioCtx.resume();if(audioCtx.state!=='running')throw Error('音を有効にできません。もう一度ボタンを押してください。')}
-function tone(){if(!audioCtx||audioCtx.state!=='running')return;const patterns={bell:[880,1175,1568],rise:[523,659,784,1047],pulse:[740,740,988,988]};patterns[data.sound].forEach((f,i)=>{const o=audioCtx.createOscillator(),g=audioCtx.createGain(),t=audioCtx.currentTime+i*.22;o.type='triangle';o.frequency.value=f;g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(data.volume/100*.35,t+.02);g.gain.exponentialRampToValueAtTime(.001,t+.21);o.connect(g);g.connect(audioCtx.destination);o.start(t);o.stop(t+.22)})}
+function tone(){
+ if(!audioCtx||audioCtx.state!=='running')return;
+ const now=audioCtx.currentTime,vol=data.volume/100;
+ function beep(freq,offset,duration,type,level){
+  const o=audioCtx.createOscillator(),g=audioCtx.createGain(),t=now+offset;
+  o.type=type;o.frequency.setValueAtTime(freq,t);
+  g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(vol*level,t+.008);
+  g.gain.setValueAtTime(vol*level,t+duration-.02);g.gain.exponentialRampToValueAtTime(.0001,t+duration);
+  o.connect(g);g.connect(audioCtx.destination);o.start(t);o.stop(t+duration+.01);
+ }
+ if(data.sound==='strongBell'){for(let i=0;i<7;i++){beep(1250,i*.145,.11,'square',.15);beep(1730,i*.145,.11,'triangle',.13)}}
+ else if(data.sound==='siren'){for(let i=0;i<4;i++)beep(i%2?680:1180,i*.28,.24,'sawtooth',.18)}
+ else if(data.sound==='hard'){for(let i=0;i<9;i++)beep(i%3===2?1450:1050,i*.12,.085,'square',.20)}
+ else {const patterns={bell:[880,1175,1568],rise:[523,659,784,1047],pulse:[740,740,988,988]};patterns[data.sound].forEach((f,i)=>beep(f,i*.22,.21,'triangle',.35))}
+}
 function stopRing(){clearInterval(ringTimer);clearTimeout(testTimer);ringTimer=null;$('stopAlarm').classList.add('hidden');if(audioCtx){audioCtx.suspend().catch(()=>{})}}
 async function ring(test=false){try{await unlock();clearInterval(ringTimer);clearTimeout(testTimer);tone();ringTimer=setInterval(tone,1200);$('stopAlarm').classList.remove('hidden');$('alarmStatus').textContent=test?'選んだ音を再生中。端末の音量も確認してください。':'⏰ おはよう！ 起きる時間です。';if(test)testTimer=setTimeout(()=>{stopRing();$('alarmStatus').textContent='テスト音を停止しました。'},3000)}catch(e){$('alarmStatus').textContent=e.message}}
 $('arm').onclick=async()=>{try{await unlock();tone();armed=true;$('arm').textContent='✅ アラーム準備中';$('alarmStatus').textContent=`準備OK！ ${data.target}（日本時間）。Safariの画面を開いたままにしてください。`;if('wakeLock'in navigator)try{wakeLock=await navigator.wakeLock.request('screen')}catch{}}catch(e){$('alarmStatus').textContent=e.message}};$('testAlarm').onclick=()=>ring(true);$('stopAlarm').onclick=()=>{stopRing();$('alarmStatus').textContent='停止しました。今日もいい朝にしよう！'};
